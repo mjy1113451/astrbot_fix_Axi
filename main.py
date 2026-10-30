@@ -1,12 +1,63 @@
 # main.py
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
-from astrbot.api.message_components import Reply
+from astrbot.api.message_components import Reply, At
 from astrbot.api import logger
 
-class FixQuoteTimestampPlugin(Star):
+
+class FixQuoteAndMentionPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
+
+    # ============ 功能一：@ 非 bot 不回复 ============
+
+    def _is_at_only_others(self, event: AstrMessageEvent) -> bool:
+        """
+        判断消息是否「只 @ 了别人（不是 bot / 不是 @all）」。
+        若消息中没有 @ 组件，返回 False（不属于"@别人"场景）。
+        """
+        message_obj = getattr(event, "message_obj", None)
+        if not message_obj:
+            return False
+
+        chain = getattr(message_obj, "message", None) or []
+        at_list = [c for c in chain if isinstance(c, At)]
+        if not at_list:
+            return False  # 没有 @ 任何人
+
+        self_id = str(getattr(message_obj, "self_id", "") or "")
+
+        for at in at_list:
+            at_qq = str(getattr(at, "qq", "") or "").lower()
+            # @全体成员 或 @bot 自身 => 视为正常需要回复
+            if at_qq == "all" or (self_id and at_qq == self_id):
+                return False
+        # 存在 @ 组件，且没有任何一个指向 bot / all
+        return True
+
+    @filter.on_waking_check()
+    async def block_at_others_waking(self, event: AstrMessageEvent) -> bool:
+        """第一道拦截：仅 @ 别人时，不唤醒 bot。"""
+        if self._is_at_only_others(event):
+            logger.debug(
+                "[FixQuote] waking_check: 仅 @ 非 bot 用户，阻止唤醒"
+            )
+            return False
+        return True
+
+    @filter.on_llm_request()
+    async def block_at_others_llm(self, event: AstrMessageEvent):
+        """
+        第二道拦截：兜底防止 enhance_mode 等主动回复插件绕过 waking_check。
+        在真正的 LLM 请求前停止事件。
+        """
+        if self._is_at_only_others(event):
+            logger.debug(
+                "[FixQuote] on_llm_request: 仅 @ 非 bot 用户，停止事件"
+            )
+            event.stop_event()
+
+    # ============ 功能二：修复 1970 引用 ============
 
     @filter.on_decorating_result()
     async def fix_quote_id(self, event: AstrMessageEvent):
@@ -18,23 +69,20 @@ class FixQuoteTimestampPlugin(Star):
         if not result or not result.chain:
             return
 
-        for comp in result.chain:
+        for comp in list(result.chain):
             if not isinstance(comp, Reply):
                 continue
 
             original_id = comp.id
-            # 匹配 "msg" 后跟数字的格式，例如 "msg688014524"
             if isinstance(original_id, str) and original_id.startswith("msg"):
                 try:
-                    numeric_part = original_id[3:]  # 去掉 "msg"
-                    # 还原为负数 ID
-                    fixed_id = f"-{numeric_part}"
+                    fixed_id = f"-{original_id[3:]}"
                     comp.id = fixed_id
                     logger.debug(
                         f"[FixQuote] 修正引用 ID: {original_id} -> {fixed_id}"
                     )
-                except (ValueError, IndexError):
+                except Exception:
                     logger.warning(
-                        f"[FixQuote] 无法解析引用 ID: {original_id}，将移除该引用"
+                        f"[FixQuote] 无法解析引用 ID: {original_id}，移除该引用"
                     )
                     result.chain.remove(comp)
