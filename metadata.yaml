@@ -1,0 +1,5 @@
+name: astrbot_plugin_fix_quote_timestamp
+desc: 修复因引用消息 ID 格式不匹配导致的 1970 年时间戳显示问题
+version: 0.1.0
+author: mjy1113451
+repo: https://github.com/mjy1113451/astrbot_plugin_fix_quote_timestamp
