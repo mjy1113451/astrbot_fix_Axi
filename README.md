@@ -1,1 +1,1 @@
-修复
+修复astrbot_plugin_astrbot_enhance_mode插件的一些bug
