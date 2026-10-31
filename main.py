@@ -9,7 +9,7 @@ class FixQuoteAndMentionPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
 
-    # ============ 功能一：@ 非 bot 不回复 ============
+    # ============ 功能一：@ 非 bot 不回复（仅在 on_llm_request 兜底） ============
 
     def _is_at_only_others(self, event: AstrMessageEvent) -> bool:
         """
@@ -35,21 +35,11 @@ class FixQuoteAndMentionPlugin(Star):
         # 存在 @ 组件，且没有任何一个指向 bot / all
         return True
 
-    @filter.on_waking_check()
-    async def block_at_others_waking(self, event: AstrMessageEvent) -> bool:
-        """第一道拦截：仅 @ 别人时，不唤醒 bot。"""
-        if self._is_at_only_others(event):
-            logger.debug(
-                "[FixQuote] waking_check: 仅 @ 非 bot 用户，阻止唤醒"
-            )
-            return False
-        return True
-
     @filter.on_llm_request()
     async def block_at_others_llm(self, event: AstrMessageEvent):
         """
-        第二道拦截：兜底防止 enhance_mode 等主动回复插件绕过 waking_check。
-        在真正的 LLM 请求前停止事件。
+        在 LLM 请求前兜底拦截：仅 @ 非 bot 用户时停止事件，
+        防止 enhance_mode 等主动回复插件绕过前端唤醒检查。
         """
         if self._is_at_only_others(event):
             logger.debug(
